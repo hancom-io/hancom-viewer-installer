@@ -9,7 +9,6 @@ viewer_installer_sources = [
 viewer_installer_deps = [
   dependency('gio-2.0', version: '>= 2.50'),
   dependency('gtk+-3.0', version: '>= 3.22'),
-  dependency('libgtop-2.0', version: '>=2.37.0'),
   dependency('glib-2.0',    version: '>=2.56.0'),
   dependency('json-glib-1.0', version : '>= 1.2.0'),
   dependency('libcurl')

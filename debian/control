@@ -1,7 +1,7 @@
 Source: hancom-viewer-installer
 Section: gnome
 Priority: optional
-Maintainer: Hancom Gooroom Maintainers <gooroom@gooroom.kr>
+Maintainer: Hancom Gooroom Maintainers <gooroom@hancom.com>
 Build-Depends: appstream-util,
 			   debhelper (>= 10),
 			   desktop-file-utils,
