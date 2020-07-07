@@ -1,3 +1,10 @@
+hancom-viewer-installer (0.1.2+han2u1) unstable; urgency=medium
+
+  [ donghun ]
+  * [40c3baed] Removed dependency and modify copyright
+
+ -- Gooroom Autobuilder <jenkins@gooroom.kr>  Tue, 07 Jul 2020 20:16:39 +0900
+
 hancom-viewer-installer (0.1.1+han2u1) unstable; urgency=medium
 
   * Initial release.
