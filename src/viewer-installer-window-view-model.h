@@ -34,9 +34,6 @@ struct _ViewerInstallerWindowViewModelClass
 
 ViewerInstallerWindowViewModel *viewer_installer_window_view_model_new (void);
 
-guint
-viewer_installer_window_view_model_get_percentage (ViewerInstallerWindowViewModel *view_model);
-
 gchar* 
 viewer_installer_window_view_model_get_error (ViewerInstallerWindowViewModel *view_model);
 

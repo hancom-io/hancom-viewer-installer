@@ -31,6 +31,7 @@
 enum
 {
     PROP_STATUS= 1,
+    PROP_PROGRESS,
     PROP_LAST
 };
 
@@ -48,11 +49,13 @@ typedef struct
     gchar     *md5;
 
     guint     status;
+    guint     progress;
     guint     install_id;
-    guint     percentage;
 
     gboolean  is_valid;
 
+    GThread   *status_thread;
+    GThread   *progress_thread;
     GPtrArray *dependencies;
 
 }ViewerInstallerWindowViewModelPrivate;
@@ -60,6 +63,7 @@ typedef struct
 G_DEFINE_TYPE_WITH_PRIVATE (ViewerInstallerWindowViewModel, viewer_installer_window_view_model, G_TYPE_OBJECT)
 
 static GParamSpec *pspec = NULL;
+static GMutex status_mutex, progress_mutex;
 
 static size_t
 write_data(void *ptr, size_t size, size_t nmemb, FILE *stream)
@@ -80,10 +84,9 @@ static int xferinfo(void *user_data,
 
     p = ((double)dlnow / (double)dltotal ) * 100;
 
-    if (priv->percentage != p)
+    if (priv->progress != p)
     {
-        priv->percentage = p;
-        g_object_set (G_OBJECT (user_data), "status", STATUS_PROGRESS, NULL);
+        g_object_set (G_OBJECT (user_data), "progress", p, NULL);
     }
 
     return 0;
@@ -192,6 +195,7 @@ hangul_download_func (gpointer user_data)
     {
         fp = fopen (out_file, "wb");
         curl_easy_setopt(curl, CURLOPT_URL, uri);
+        curl_easy_setopt(curl, CURLOPT_USERNAME, "HancomGooroom");
         curl_easy_setopt(curl, CURLOPT_REFERER, VIEWER_REFERER);
 
         if (priv->md5)
@@ -296,23 +300,13 @@ viewer_installer_window_view_model_get_error (ViewerInstallerWindowViewModel *vi
     return priv->error;
 }
 
-guint
-viewer_installer_window_view_model_get_percentage (ViewerInstallerWindowViewModel *view_model)
-{
-    g_return_val_if_fail (VIEWER_INSTALLER_WINDOW_VIEW_MODEL (view_model), 0);
-
-    ViewerInstallerWindowViewModelPrivate *priv;
-    priv = viewer_installer_window_view_model_get_instance_private (view_model);
-    return priv->percentage;
-}
-
 void
 viewer_installer_window_view_model_download(ViewerInstallerWindowViewModel *view_model)
 {
     g_return_if_fail (VIEWER_INSTALLER_WINDOW_VIEW_MODEL (view_model));
 
     gboolean is_connected;
-    ViewerInstallerWindowViewModelPrivate *priv; 
+    ViewerInstallerWindowViewModelPrivate *priv;
     priv = viewer_installer_window_view_model_get_instance_private (view_model);
 
     GNetworkMonitor *monitor = g_network_monitor_get_default();
@@ -327,9 +321,10 @@ viewer_installer_window_view_model_download(ViewerInstallerWindowViewModel *view
 
     g_object_set (G_OBJECT (view_model), "status", STATUS_DOWNLOADING, NULL);
 
-    GThread *thread;
-    thread = g_thread_new ("hangul-download", (GThreadFunc)hangul_download_func, view_model);
-    g_thread_unref (thread);
+    if (priv->status_thread)
+        g_thread_unref (priv->status_thread);
+
+    priv->status_thread = g_thread_new ("hangul-download", (GThreadFunc)hangul_download_func, view_model);
 }
 
 void
@@ -337,11 +332,15 @@ viewer_installer_window_view_model_install(ViewerInstallerWindowViewModel *view_
 {
     g_return_if_fail (VIEWER_INSTALLER_WINDOW_VIEW_MODEL (view_model));
 
+    ViewerInstallerWindowViewModelPrivate *priv;
+    priv = viewer_installer_window_view_model_get_instance_private (view_model);
+
     g_object_set (G_OBJECT (view_model), "status", STATUS_INSTALLING, NULL);
 
-    GThread *thread;
-    thread = g_thread_new ("hangul-install", (GThreadFunc)hangul_install_func, view_model);
-    g_thread_unref (thread);
+    if (priv->progress_thread)
+        g_thread_unref (priv->progress_thread);
+
+    priv->progress_thread = g_thread_new ("hangul-install", (GThreadFunc)hangul_install_func, view_model);
 }
 
 static void
@@ -433,7 +432,15 @@ viewer_installer_window_view_model_set_property (GObject *object,
 
     if (property_id == PROP_STATUS)
     {
+        g_mutex_lock (&status_mutex);
         priv->status = g_value_get_uint (value);
+        g_mutex_unlock (&status_mutex);
+    }
+    else if (property_id == PROP_PROGRESS)
+    {
+        g_mutex_lock (&progress_mutex);
+        priv->progress = g_value_get_uint (value);
+        g_mutex_unlock (&progress_mutex);
     }
 }
 
@@ -453,7 +460,15 @@ viewer_installer_window_view_model_get_property (GObject *object,
 
     if (property_id == PROP_STATUS)
     {
+        g_mutex_lock (&status_mutex);
         g_value_set_uint (value, priv->status);
+        g_mutex_unlock (&status_mutex);
+    }
+    else if (property_id == PROP_PROGRESS)
+    {
+        g_mutex_lock (&progress_mutex);
+        g_value_set_uint (value, priv->progress);
+        g_mutex_unlock (&progress_mutex);
     }
 }
 
@@ -471,6 +486,9 @@ viewer_installer_window_view_model_network_changed (GNetworkMonitor *monitor,
     priv = viewer_installer_window_view_model_get_instance_private (view_model);
 
     if (network_available)
+        return;
+
+    if (STATUS_INSTALLING <= priv->status)
         return;
 
     gchar *out_file;
@@ -491,6 +509,18 @@ viewer_installer_window_view_model_dispose (GObject *object)
 
     view_model = VIEWER_INSTALLER_WINDOW_VIEW_MODEL (object);
     priv = viewer_installer_window_view_model_get_instance_private (view_model);
+
+    if (priv->status_thread)
+    {
+        g_thread_join (priv->status_thread);
+        priv->status_thread = NULL;
+    }
+
+    if (priv->status_thread)
+    {
+        g_thread_join (priv->status_thread);
+        priv->status_thread = NULL;
+    }
 
     if (priv->error)
     {
@@ -547,8 +577,10 @@ viewer_installer_window_view_model_class_init (ViewerInstallerWindowViewModelCla
     object_class->get_property = viewer_installer_window_view_model_get_property;
 
     pspec= g_param_spec_uint ("status", "Status", "Install Status", STATUS_NORMAL, N_STATUS, STATUS_NORMAL, G_PARAM_READWRITE);
-
     g_object_class_install_property (object_class, PROP_STATUS, pspec);
+
+    pspec= g_param_spec_uint ("progress", "Progress", "Download progress", 0, 100, 0, G_PARAM_READWRITE);
+    g_object_class_install_property (object_class, PROP_PROGRESS, pspec);
 }
 
 static void
@@ -558,9 +590,11 @@ viewer_installer_window_view_model_init (ViewerInstallerWindowViewModel *self)
     priv->status = STATUS_NORMAL;
     priv->is_valid = FALSE;
     priv->install_id = 0;
-    priv->percentage = 0;
+    priv->progress = 0;
     priv->package = NULL;
     priv->file_name = NULL;
+    priv->status_thread = NULL;
+    priv->progress_thread = NULL;
     priv->dependencies = g_ptr_array_new ();
 
     GNetworkMonitor *monitor = g_network_monitor_get_default();
