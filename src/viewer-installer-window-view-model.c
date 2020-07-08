@@ -54,8 +54,8 @@ typedef struct
 
     gboolean  is_valid;
 
-    GThread   *status_thread;
-    GThread   *progress_thread;
+    GThread   *download_thread;
+    GThread   *install_thread;
     GPtrArray *dependencies;
 
 }ViewerInstallerWindowViewModelPrivate;
@@ -63,7 +63,7 @@ typedef struct
 G_DEFINE_TYPE_WITH_PRIVATE (ViewerInstallerWindowViewModel, viewer_installer_window_view_model, G_TYPE_OBJECT)
 
 static GParamSpec *pspec = NULL;
-static GMutex status_mutex, progress_mutex;
+static GMutex thread_mutex;
 
 static size_t
 write_data(void *ptr, size_t size, size_t nmemb, FILE *stream)
@@ -72,9 +72,10 @@ write_data(void *ptr, size_t size, size_t nmemb, FILE *stream)
     return written;
 }
 
-static int xferinfo(void *user_data,
-                    curl_off_t dltotal, curl_off_t dlnow,
-                    curl_off_t ultotal, curl_off_t ulnow)
+static int
+xferinfo(void *user_data,
+         curl_off_t dltotal, curl_off_t dlnow,
+         curl_off_t ultotal, curl_off_t ulnow)
 {
     g_return_val_if_fail (VIEWER_INSTALLER_WINDOW_VIEW_MODEL(user_data), 0);
 
@@ -112,7 +113,9 @@ hangul_download_check_cb (char* buffer, size_t size, size_t nmemb, void *user_da
 
             if (g_strcmp0 (sha256, priv->sha256) == 0)
             {
+                g_mutex_lock (&thread_mutex);
                 priv->is_valid = TRUE;
+                g_mutex_unlock (&thread_mutex);
             }
         }
 
@@ -156,7 +159,7 @@ hangul_download_check (void *user_data, gchar* uri)
     }
 
     curl_easy_cleanup(curl);
-    curl_global_cleanup ();
+
     return result;
 }
 
@@ -165,30 +168,18 @@ hangul_download_func (gpointer user_data)
 {
     g_return_val_if_fail (VIEWER_INSTALLER_WINDOW_VIEW_MODEL(user_data), G_SOURCE_REMOVE);
 
-    gchar *out_file;
-    ViewerInstallerWindowViewModelPrivate *priv;
-    priv = viewer_installer_window_view_model_get_instance_private (user_data);
-
-    out_file = g_strdup_printf ("%s/%s", OUT_PATH, priv->file_name);
-
-    if (g_file_test (out_file, G_FILE_TEST_EXISTS))
-    {
-        unlink (out_file);
-    }
-
-    gchar *uri;
-    uri = g_strdup_printf ("%s/%s", VIEWER_INSTALL_URL, priv->file_name);
-
-    if (!hangul_download_check (user_data, uri))
-    {
-        priv->error = g_strdup (_("File is not valid"));
-        g_object_set (G_OBJECT (user_data), "status", STATUS_ERROR, NULL);
-        return G_SOURCE_REMOVE;
-    }
-
     FILE *fp;
     CURL *curl;
     CURLcode res;
+
+    g_autofree gchar *uri;
+    g_autofree gchar *out_file;
+
+    ViewerInstallerWindowViewModelPrivate *priv;
+    priv = viewer_installer_window_view_model_get_instance_private (user_data);
+
+    uri = g_strdup_printf ("%s/%s", VIEWER_INSTALL_URL, priv->file_name);
+    out_file = g_strdup_printf ("%s/%s", OUT_PATH, priv->file_name);
 
     curl = curl_easy_init ();
     if (curl)
@@ -214,15 +205,12 @@ hangul_download_func (gpointer user_data)
 
     if (res != CURLE_OK)
     {
-          g_object_set (G_OBJECT (user_data), "status", STATUS_ERROR, NULL);
+        g_object_set (G_OBJECT (user_data), "status", STATUS_ERROR, NULL);
     }
     else
     {
-          g_object_set (G_OBJECT (user_data), "status", STATUS_DOWNLOADED, NULL);
+        g_object_set (G_OBJECT (user_data), "status", STATUS_DOWNLOADED, NULL);
     }
-
-    g_free (out_file);
-    curl_global_cleanup ();
 
     return G_SOURCE_REMOVE;
 }
@@ -230,13 +218,17 @@ hangul_download_func (gpointer user_data)
 static gboolean
 hangul_install_func  (gpointer user_data)
 {
-    int i;
-    gchar *file;
-    gchar *param = g_strdup ("");
-    GError *error = NULL;
-    ViewerInstallerWindowViewModelPrivate *priv; 
-    priv = viewer_installer_window_view_model_get_instance_private (user_data);
+    gchar **args;
+    g_autofree gchar *file;
+    g_autofree gchar *command;
 
+    GError *error = NULL;
+
+    ViewerInstallerWindowViewModelPrivate *priv;
+    priv = viewer_installer_window_view_model_get_instance_private (user_data);
+#if 0
+    int i;
+    gchar *param = g_strdup ("");
     if (priv->dependencies && 0 < priv->dependencies->len)
     {
         for (i = 0; i < priv->dependencies->len; i++)
@@ -247,27 +239,59 @@ hangul_install_func  (gpointer user_data)
             g_free (tmp);
         }
     }
+    g_free (param);
+#endif
 
-    gchar *command;
     file = g_strdup_printf ("%s/%s", OUT_PATH, priv->file_name);
-    command = g_strdup_printf ("pkexec %s/%s/%s %s %s", LIBDIR, GETTEXT_PACKAGE, VIEWER_SCRIPT, file, param);
-    g_spawn_command_line_sync (command, NULL, NULL, NULL, &error);
+    command = g_strdup_printf ("pkexec %s/%s/%s %s", LIBDIR, GETTEXT_PACKAGE, VIEWER_SCRIPT, file);
 
-    if (error != NULL)
+    args = g_strsplit (command, " ", -1);
+
+    if (!g_spawn_sync (NULL, args, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, NULL, &error))
     {
+        unlink (file);
+        g_strfreev (args);
+
         priv->error = g_strdup (error->message);
+        g_error_free (error);
         g_object_set (G_OBJECT (user_data), "status", STATUS_ERROR, NULL);
-    }
-    else
-    {
-        g_object_set (G_OBJECT (user_data), "status", STATUS_INSTALLED, NULL);
+        return G_SOURCE_REMOVE;
     }
 
-    g_free (command);
+
     unlink (file);
-    g_free (file);
+    g_strfreev (args);
+    g_object_set (G_OBJECT (user_data), "status", STATUS_INSTALLED, NULL);
 
     return G_SOURCE_REMOVE;
+}
+
+gboolean
+viewer_installer_window_view_model_download_terminate (ViewerInstallerWindowViewModel *view_model)
+{
+    ViewerInstallerWindowViewModelPrivate *priv;
+    priv = viewer_installer_window_view_model_get_instance_private (view_model);
+
+    if (priv->download_thread)
+    {
+        g_thread_unref (priv->download_thread);
+        priv->download_thread = NULL;
+    }
+    return TRUE;
+}
+
+gboolean
+viewer_installer_window_view_model_install_terminate (ViewerInstallerWindowViewModel *view_model)
+{
+    ViewerInstallerWindowViewModelPrivate *priv;
+    priv = viewer_installer_window_view_model_get_instance_private (view_model);
+
+    if (priv->install_thread)
+    {
+        g_thread_unref (priv->install_thread);
+        priv->install_thread = NULL;
+    }
+    return TRUE;
 }
 
 gchar*
@@ -306,6 +330,10 @@ viewer_installer_window_view_model_download(ViewerInstallerWindowViewModel *view
     g_return_if_fail (VIEWER_INSTALLER_WINDOW_VIEW_MODEL (view_model));
 
     gboolean is_connected;
+
+    g_autofree gchar *uri;
+    g_autofree gchar *out_file;
+
     ViewerInstallerWindowViewModelPrivate *priv;
     priv = viewer_installer_window_view_model_get_instance_private (view_model);
 
@@ -319,12 +347,27 @@ viewer_installer_window_view_model_download(ViewerInstallerWindowViewModel *view
         return;
     }
 
+    out_file = g_strdup_printf ("%s/%s", OUT_PATH, priv->file_name);
+
+    if (g_file_test (out_file, G_FILE_TEST_EXISTS))
+    {
+        unlink (out_file);
+    }
+
+    uri = g_strdup_printf ("%s/%s", VIEWER_INSTALL_URL, priv->file_name);
+    if (!hangul_download_check (view_model, uri))
+    {
+        priv->error = g_strdup (_("File is not valid"));
+        g_object_set (G_OBJECT (view_model), "status", STATUS_ERROR, NULL);
+        return;
+    }
+
     g_object_set (G_OBJECT (view_model), "status", STATUS_DOWNLOADING, NULL);
 
-    if (priv->status_thread)
-        g_thread_unref (priv->status_thread);
+    if (priv->download_thread)
+        g_thread_unref (priv->download_thread);
 
-    priv->status_thread = g_thread_new ("hangul-download", (GThreadFunc)hangul_download_func, view_model);
+    priv->download_thread = g_thread_new ("hangul-download", (GThreadFunc)hangul_download_func, view_model);
 }
 
 void
@@ -335,12 +378,18 @@ viewer_installer_window_view_model_install(ViewerInstallerWindowViewModel *view_
     ViewerInstallerWindowViewModelPrivate *priv;
     priv = viewer_installer_window_view_model_get_instance_private (view_model);
 
+    if (priv->download_thread)
+    {
+        g_thread_unref (priv->download_thread);
+        priv->download_thread = NULL;
+    }
+
     g_object_set (G_OBJECT (view_model), "status", STATUS_INSTALLING, NULL);
 
-    if (priv->progress_thread)
-        g_thread_unref (priv->progress_thread);
+    if (priv->install_thread)
+        g_thread_unref (priv->install_thread);
 
-    priv->progress_thread = g_thread_new ("hangul-install", (GThreadFunc)hangul_install_func, view_model);
+    priv->install_thread = g_thread_new ("hangul-install", (GThreadFunc)hangul_install_func, view_model);
 }
 
 static void
@@ -413,6 +462,7 @@ viewer_installer_window_view_model_infos_init (ViewerInstallerWindowViewModel *v
 
 error :
     priv->error = g_strdup ("error, json");
+    g_error_free (error);
     return;
 }
 
@@ -430,18 +480,16 @@ viewer_installer_window_view_model_set_property (GObject *object,
     view_model = VIEWER_INSTALLER_WINDOW_VIEW_MODEL (object);
     priv = viewer_installer_window_view_model_get_instance_private (view_model);
 
+    g_mutex_lock (&thread_mutex);
     if (property_id == PROP_STATUS)
     {
-        g_mutex_lock (&status_mutex);
         priv->status = g_value_get_uint (value);
-        g_mutex_unlock (&status_mutex);
     }
     else if (property_id == PROP_PROGRESS)
     {
-        g_mutex_lock (&progress_mutex);
         priv->progress = g_value_get_uint (value);
-        g_mutex_unlock (&progress_mutex);
     }
+    g_mutex_unlock (&thread_mutex);
 }
 
 static void
@@ -458,18 +506,16 @@ viewer_installer_window_view_model_get_property (GObject *object,
     view_model = VIEWER_INSTALLER_WINDOW_VIEW_MODEL (object);
     priv = viewer_installer_window_view_model_get_instance_private (view_model);
 
+    g_mutex_lock (&thread_mutex);
     if (property_id == PROP_STATUS)
     {
-        g_mutex_lock (&status_mutex);
         g_value_set_uint (value, priv->status);
-        g_mutex_unlock (&status_mutex);
     }
     else if (property_id == PROP_PROGRESS)
     {
-        g_mutex_lock (&progress_mutex);
         g_value_set_uint (value, priv->progress);
-        g_mutex_unlock (&progress_mutex);
     }
+    g_mutex_unlock (&thread_mutex);
 }
 
 static void
@@ -510,16 +556,16 @@ viewer_installer_window_view_model_dispose (GObject *object)
     view_model = VIEWER_INSTALLER_WINDOW_VIEW_MODEL (object);
     priv = viewer_installer_window_view_model_get_instance_private (view_model);
 
-    if (priv->status_thread)
+    if (priv->download_thread)
     {
-        g_thread_join (priv->status_thread);
-        priv->status_thread = NULL;
+        g_thread_unref (priv->download_thread);
+        priv->download_thread = NULL;
     }
 
-    if (priv->status_thread)
+    if (priv->install_thread)
     {
-        g_thread_join (priv->status_thread);
-        priv->status_thread = NULL;
+        g_thread_unref (priv->install_thread);
+        priv->install_thread = NULL;
     }
 
     if (priv->error)
@@ -558,6 +604,7 @@ viewer_installer_window_view_model_dispose (GObject *object)
         priv->md5 = NULL;
     }
 
+    g_mutex_clear (&thread_mutex);
     G_OBJECT_CLASS (viewer_installer_window_view_model_parent_class)->dispose (object);
 }
 
@@ -593,8 +640,8 @@ viewer_installer_window_view_model_init (ViewerInstallerWindowViewModel *self)
     priv->progress = 0;
     priv->package = NULL;
     priv->file_name = NULL;
-    priv->status_thread = NULL;
-    priv->progress_thread = NULL;
+    priv->download_thread = NULL;
+    priv->install_thread = NULL;
     priv->dependencies = g_ptr_array_new ();
 
     GNetworkMonitor *monitor = g_network_monitor_get_default();
@@ -602,6 +649,7 @@ viewer_installer_window_view_model_init (ViewerInstallerWindowViewModel *self)
 
     g_object_notify_by_pspec (G_OBJECT(self), pspec);
 
+    g_mutex_init (&thread_mutex);
     viewer_installer_window_view_model_infos_init (self);
 }
 

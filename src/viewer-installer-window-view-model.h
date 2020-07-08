@@ -34,13 +34,19 @@ struct _ViewerInstallerWindowViewModelClass
 
 ViewerInstallerWindowViewModel *viewer_installer_window_view_model_new (void);
 
-gchar* 
+gboolean
+viewer_installer_window_view_model_download_terminate (ViewerInstallerWindowViewModel *view_model);
+
+gboolean
+viewer_installer_window_view_model_install_terminate (ViewerInstallerWindowViewModel *view_model);
+
+gchar*
 viewer_installer_window_view_model_get_error (ViewerInstallerWindowViewModel *view_model);
 
-gchar* 
+gchar*
 viewer_installer_window_view_model_get_package (ViewerInstallerWindowViewModel *view_model);
 
-gchar* 
+gchar*
 viewer_installer_window_view_model_get_file_name (ViewerInstallerWindowViewModel *view_model);
 
 void

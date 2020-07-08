@@ -100,6 +100,19 @@ viewer_installer_window_button_install_clicked (GtkWidget *button, ViewerInstall
     viewer_installer_window_view_model_download(priv->view_model);
 }
 
+static gboolean
+viewer_installer_window_install_cb (gpointer user_data)
+{
+    ViewerInstallerWindow *win = user_data;
+    ViewerInstallerWindowPrivate *priv;
+
+    priv = viewer_installer_window_get_instance_private (win);
+
+    viewer_installer_window_view_model_install(priv->view_model);
+
+    return G_SOURCE_REMOVE;
+}
+
 static void
 viewer_installer_window_notify_status (GObject *object,
                                        GParamSpec *pspec,
@@ -135,7 +148,8 @@ viewer_installer_window_notify_status (GObject *object,
         {
             gchar *txt = g_strdup (_("Downloaded"));
             gtk_label_set_text (priv->status_label, txt);
-            viewer_installer_window_view_model_install(priv->view_model);
+            viewer_installer_window_view_model_download_terminate (priv->view_model);
+            g_timeout_add (1000, viewer_installer_window_install_cb, data);
             break;
         }
         case STATUS_INSTALLING:
@@ -148,6 +162,7 @@ viewer_installer_window_notify_status (GObject *object,
         {
             gchar *txt;
             gchar *package;
+            viewer_installer_window_view_model_install_terminate (priv->view_model);
             package = viewer_installer_window_view_model_get_package (priv->view_model);
 
             if (check_package(package))
