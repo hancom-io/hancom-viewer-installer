@@ -31,7 +31,6 @@ struct _ViewerInstallerWindow
 
 typedef struct
 {
-    GSettings           *settings;
     ViewerInstallerWindowViewModel *view_model;
 
     /* Template widgets */
@@ -52,7 +51,6 @@ typedef struct
     GtkButton           *close_button;
 
     GtkProgressBar      *install_progressbar;
-    GtkCheckButton      *auto_start_check;
 } ViewerInstallerWindowPrivate;
 
 
@@ -87,18 +85,6 @@ viewer_installer_window_check_package (ViewerInstallerWindow *win)
     }
 }
 #endif
-static void viewer_installer_window_auto_start_toggled (GtkToggleButton *button, ViewerInstallerWindow *win)
-{
-    gboolean checked;
-    ViewerInstallerWindowPrivate *priv;
-
-    g_return_if_fail (VIEWER_INSTALLER_WINDOW(win));
-
-    priv = viewer_installer_window_get_instance_private (win);
-    checked = gtk_toggle_button_get_active (button);
-
-    g_settings_set_boolean (priv->settings, VIEWER_SCHEMA_KEY, checked);
-}
 
 static void viewer_installer_window_button_close_clicked (GtkWidget *button, ViewerInstallerWindow *win)
 {
@@ -116,10 +102,10 @@ viewer_installer_window_button_install_clicked (GtkWidget *button, ViewerInstall
 
 static void
 viewer_installer_window_notify_status (GObject *object,
-                                             GParamSpec *pspec,
-                                             gpointer data)
+                                       GParamSpec *pspec,
+                                       gpointer data)
 {
-    gint val;
+    guint val;
     guint *status;
 
     ViewerInstallerWindow *win = data;
@@ -131,7 +117,7 @@ viewer_installer_window_notify_status (GObject *object,
 
     g_object_get (object, "status", &status, NULL);
 
-    val = GPOINTER_TO_INT (status);
+    val = GPOINTER_TO_UINT (status);
 
     switch (val)
     {
@@ -167,7 +153,6 @@ viewer_installer_window_notify_status (GObject *object,
             if (check_package(package))
             {
                 txt = g_strdup (_("The installation of Hangul 2020 Viewer Beta is complete"));
-                g_settings_set_boolean (priv->settings, VIEWER_SCHEMA_KEY, TRUE);
             }
             else
             {
@@ -178,13 +163,6 @@ viewer_installer_window_notify_status (GObject *object,
             gtk_stack_set_visible_child (GTK_STACK (priv->bar_stack), priv->end_bar);
             gtk_header_bar_set_show_close_button (GTK_HEADER_BAR(priv->header_bar), TRUE);
             g_object_freeze_notify (object);
-            break;
-        }
-        case STATUS_PROGRESS:
-        {
-            gdouble percentage;
-            percentage = viewer_installer_window_view_model_get_percentage (priv->view_model);
-            gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (priv->install_progressbar), percentage / 100.f);
             break;
         }
         case STATUS_ERROR :
@@ -199,6 +177,28 @@ viewer_installer_window_notify_status (GObject *object,
         default:
             break;
     }
+}
+
+static void
+viewer_installer_window_notify_progress (GObject *object,
+                                         GParamSpec *pspec,
+                                         gpointer data)
+{
+    gdouble val;
+    guint *progress;
+
+    ViewerInstallerWindow *win = data;
+    ViewerInstallerWindowPrivate *priv;
+
+    g_return_if_fail (VIEWER_INSTALLER_WINDOW(data));
+
+    priv = viewer_installer_window_get_instance_private (win);
+
+    g_object_get (object, "progress", &progress, NULL);
+
+    val = GPOINTER_TO_UINT (progress) / 100.f;
+
+    gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (priv->install_progressbar), val);
 }
 
 static void
@@ -222,12 +222,6 @@ viewer_installer_window_dispose (GObject *self)
     {
         g_object_unref (priv->view_model);
         priv->view_model = NULL;
-    }
-
-    if (priv->settings)
-    {
-        g_object_unref (priv->settings);
-        priv->settings = NULL;
     }
 
     G_OBJECT_CLASS (viewer_installer_window_parent_class)->dispose (self);
@@ -263,7 +257,6 @@ viewer_installer_window_class_init (ViewerInstallerWindowClass *klass)
     gtk_widget_class_bind_template_child_private (widget_class, ViewerInstallerWindow, installing_button);
     gtk_widget_class_bind_template_child_private (widget_class, ViewerInstallerWindow, close_button);
     gtk_widget_class_bind_template_child_private (widget_class, ViewerInstallerWindow, install_progressbar);
-    gtk_widget_class_bind_template_child_private (widget_class, ViewerInstallerWindow, auto_start_check);
 }
 
 static void
@@ -280,16 +273,15 @@ viewer_installer_window_init (ViewerInstallerWindow *self)
     gtk_image_set_from_pixbuf (priv->main_image, pixbuf);
 
     priv->view_model = viewer_installer_window_view_model_new ();
-    priv->settings = g_settings_new (VIEWER_SCHEMA);
 
     //viewer_installer_window_check_package (self);
  
-    g_signal_connect (priv->auto_start_check, "toggled",
-              G_CALLBACK (viewer_installer_window_auto_start_toggled), self);
     g_signal_connect (priv->close_button, "clicked",
               G_CALLBACK (viewer_installer_window_button_close_clicked), self);
     g_signal_connect (priv->install_button, "clicked",
               G_CALLBACK (viewer_installer_window_button_install_clicked), self);
     g_signal_connect (priv->view_model, "notify::status",
               G_CALLBACK (viewer_installer_window_notify_status), self);
+    g_signal_connect (priv->view_model, "notify::progress",
+              G_CALLBACK (viewer_installer_window_notify_progress), self);
 }

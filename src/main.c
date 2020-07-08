@@ -29,20 +29,9 @@ main (int   argc,
 {
     g_autoptr(GtkApplication) app = NULL;
 
-	gboolean checked;
-	GSettings *settings;
-
     if (check_package (VIEWER_NAME))
 	{
 	    return 0;
-	}
-
-    settings = g_settings_new (VIEWER_SCHEMA);
-    checked = g_settings_get_boolean (settings, VIEWER_SCHEMA_KEY);
-	if (checked)
-	{
-	    g_object_unref (settings);
-		return 0;
 	}
 
     /* Set up gettext translations */
