@@ -1,3 +1,10 @@
+hancom-viewer-installer (0.1.5+han2u1) unstable; urgency=medium
+
+  [ donghun ]
+  * [b53fa674] Fixed error when calling GUI in thread
+
+ -- Gooroom Autobuilder <jenkins@gooroom.kr>  Thu, 09 Jul 2020 18:40:40 +0900
+
 hancom-viewer-installer (0.1.4+han2u1) unstable; urgency=medium
 
   [ donghun ]
