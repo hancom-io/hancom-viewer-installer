@@ -101,7 +101,7 @@ viewer_installer_window_button_install_clicked (GtkWidget *button, ViewerInstall
 }
 
 static gboolean
-viewer_installer_window_install_cb (gpointer user_data)
+viewer_installer_window_start_install (gpointer user_data)
 {
     ViewerInstallerWindow *win = user_data;
     ViewerInstallerWindowPrivate *priv;
@@ -149,7 +149,7 @@ viewer_installer_window_notify_status (GObject *object,
             gchar *txt = g_strdup (_("Downloaded"));
             gtk_label_set_text (priv->status_label, txt);
             viewer_installer_window_view_model_download_terminate (priv->view_model);
-            g_timeout_add (1000, viewer_installer_window_install_cb, data);
+            g_timeout_add (1000, viewer_installer_window_start_install, data);
             break;
         }
         case STATUS_INSTALLING:

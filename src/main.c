@@ -23,16 +23,34 @@
 #include "viewer-installer-config.h"
 #include "viewer-installer-application.h"
 
+static gboolean
+check_live_installer ()
+{
+    gchar *installer_path;
+    gboolean res;
+
+    installer_path = g_find_program_in_path ("live-installer");
+    res = (installer_path != NULL);
+    g_free (installer_path);
+
+    return res;
+}
+
 int
 main (int   argc,
       char *argv[])
 {
-    g_autoptr(GtkApplication) app = NULL;
+    if (check_live_installer ())
+    {
+        return 0;
+    }
 
     if (check_package (VIEWER_NAME))
-	{
-	    return 0;
-	}
+    {
+        return 0;
+    }
+
+    g_autoptr(GtkApplication) app = NULL;
 
     /* Set up gettext translations */
     bindtextdomain (GETTEXT_PACKAGE, LOCALEDIR);
