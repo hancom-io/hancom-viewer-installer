@@ -1,3 +1,10 @@
+hancom-viewer-installer (0.1.6+han2u1) unstable; urgency=medium
+
+  [ donghun ]
+  * [a62976e4] Modified the checksum of SHA56 and MD5
+
+ -- Gooroom Autobuilder <jenkins@gooroom.kr>  Mon, 13 Jul 2020 15:06:37 +0900
+
 hancom-viewer-installer (0.1.5+han2u1) unstable; urgency=medium
 
   [ donghun ]
