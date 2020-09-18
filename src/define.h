@@ -10,6 +10,8 @@ typedef enum
   N_STATUS
 } InstallStatus;
 
+#define TOOLKIT_NAME "hancom-toolkit"
+
 #define VIEWER_NAME "hoffice-hwpviewer"
 #define VIEWER_CHECK "hancom-viewer-check"
 #define VIEWER_SCRIPT "hancom-viewer-install"
